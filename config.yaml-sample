@@ -1,0 +1,16 @@
+storage:
+  scan_paths:
+    - "/path/to/your/files"
+  exclude_patterns:
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "*.tmp"
+
+database:
+  dsn: "127.0.0.1:9306" # Протокол MySQL для Manticore
+  table_name: "files"
+  batch_size: 1000
+
+performance:
+  hash_workers: 2 # Ограничение для HDD
+  buffer_size: 1MB # Размер буфера при чтении файла для хеша
