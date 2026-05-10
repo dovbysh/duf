@@ -1,4 +1,4 @@
-###
+### no sha256
 POST http://localhost:9308/search
 Content-Type: application/json
 
@@ -15,6 +15,52 @@ Content-Type: application/json
       ]
 }
 }
+}
+
+### no tc
+POST http://localhost:9308/search
+Content-Type: application/json
+
+{
+"table":"files",
+  "join": [
+    {
+      "type": "left",
+      "table": "tc",
+      "on": [
+        {
+          "left": {
+            "table": "tc",
+            "field": "id"
+          },
+          "operator": "eq",
+          "right": {
+            "table": "files",
+            "field": "id"
+          }
+        }
+      ]
+    }
+  ],
+"query": {
+    "bool": {
+      "must": [
+        {
+          "equals": {
+            "tc.id": 0
+          }
+        }
+      ],
+      "must_not": [
+        {
+          "equals": {
+            "tc.id": 0
+          }
+        }
+      ]
+}
+},
+  "sort": ["id"]
 }
 
 ###

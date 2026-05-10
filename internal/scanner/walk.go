@@ -31,7 +31,10 @@ func (s *Scanner) Scan(root string, results chan<- models.FileRecord) error {
 			}
 			return nil
 		}
-
+		m := d.Type()
+		if m&fs.ModeSymlink > 0 {
+			return nil
+		}
 		if !d.IsDir() {
 			info, err := d.Info()
 			if err != nil {

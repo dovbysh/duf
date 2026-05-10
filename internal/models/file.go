@@ -1,7 +1,9 @@
 package models
 
+import "encoding/json"
+
 type FileRecord struct {
-	ID        int64 // Хеш от полного пути
+	ID        json.Number // Хеш от полного пути
 	Path      string
 	Name      string
 	Size      int64

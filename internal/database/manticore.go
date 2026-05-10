@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
 	"net/http"
 	"strings"
 
@@ -14,9 +14,10 @@ import (
 )
 
 type ManticoreClient struct {
-	httpAddr  string
-	client    *manticore.APIClient
-	tableName string
+	httpAddr   string
+	httpClient *http.Client
+	client     *manticore.APIClient
+	tableName  string
 }
 
 func NewClient(host string, tableName string) (*ManticoreClient, error) {
@@ -25,9 +26,10 @@ func NewClient(host string, tableName string) (*ManticoreClient, error) {
 	client := manticore.NewAPIClient(config)
 
 	return &ManticoreClient{
-		client:    client,
-		tableName: tableName,
-		httpAddr:  host,
+		client:     client,
+		tableName:  tableName,
+		httpAddr:   host,
+		httpClient: &http.Client{},
 	}, nil
 }
 
@@ -150,13 +152,8 @@ func (m *ManticoreClient) GetFilesWithoutHash(ctx context.Context, limit int32) 
 		if path == "" {
 			continue
 		}
-		id, err := hit.ID.Int64()
-		if err != nil {
-			log.Println("Error getting file id:", hit.ID.String(), err)
-			continue
-		}
 		files = append(files, models.FileRecord{
-			ID:   id,
+			ID:   hit.ID,
 			Path: path,
 		})
 	}
@@ -164,9 +161,39 @@ func (m *ManticoreClient) GetFilesWithoutHash(ctx context.Context, limit int32) 
 	return files, nil
 }
 
-func (m *ManticoreClient) UpdateHash(ctx context.Context, id int64, hash string) error {
-	// Прямой SQL UPDATE — самый надежный способ
-	query := fmt.Sprintf("UPDATE %s SET sha256 = '%s' WHERE id = %d", m.tableName, hash, id)
-	_, _, err := m.client.UtilsAPI.Sql(ctx).Body(query).Execute()
-	return err
+func (m *ManticoreClient) UpdateHash(ctx context.Context, id json.Number, hash string) error {
+	// Construct the update request body
+	requestBody := map[string]interface{}{
+		"table": m.tableName,
+		"id":    id,
+		"doc": map[string]interface{}{
+			"sha256": hash,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return fmt.Errorf("marshal update error: %w", err)
+	}
+
+	// Send POST request to /update
+	req, err := http.NewRequestWithContext(ctx, "POST", m.httpAddr+"/update", bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("create request error: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("do request error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for Manticore errors
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("manticore update failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
 }

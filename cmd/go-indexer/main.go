@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/dovbysh/duf.git/internal/config"
 	"github.com/dovbysh/duf.git/internal/database"
 	"github.com/dovbysh/duf.git/internal/hasher"
 	"github.com/dovbysh/duf.git/internal/models"
+	"github.com/dovbysh/duf.git/internal/scanner"
 )
 
 func main() {
@@ -29,39 +32,42 @@ func main() {
 	//	log.Fatal("DB InitSchema error:", err)
 	//}
 	//
-	//fileChan := make(chan models.FileRecord, 100)
-	//go func() {
-	//	s := scanner.NewScanner(cfg.Storage.ExcludePatterns)
-	//	for _, path := range cfg.Storage.ScanPaths {
-	//		s.Scan(path, fileChan)
-	//	}
-	//	close(fileChan)
-	//}()
-	//
-	//// Пакетная вставка в БД
-	//var batch []models.FileRecord
-	//for f := range fileChan {
-	//	batch = append(batch, f)
-	//	if len(batch) >= cfg.Database.BatchSize {
-	//		db.BatchReplace(ctx, batch)
-	//		batch = batch[:0]
-	//	}
-	//}
-	//db.BatchReplace(ctx, batch) // хвост
+	fileChan := make(chan models.FileRecord, 100)
+	go func() {
+		s := scanner.NewScanner(cfg.Storage.ExcludePatterns)
+		for _, path := range cfg.Storage.ScanPaths {
+			s.Scan(path, fileChan)
+		}
+		close(fileChan)
+	}()
+
+	// Пакетная вставка в БД
+	var batch []models.FileRecord
+	for f := range fileChan {
+		batch = append(batch, f)
+		if len(batch) >= cfg.Database.BatchSize {
+			db.BatchReplace(ctx, batch)
+			batch = batch[:0]
+		}
+	}
+	db.BatchReplace(ctx, batch) // хвост
 
 	// 3. Расчет Хешей
-	processHashes(ctx, db, cfg)
+	for processHashes(ctx, db, cfg) > 0 {
+
+	}
 }
 
-func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *config.Config) {
-	files, err := db.GetFilesWithoutHash(ctx, 5000) // берем порцию
+func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *config.Config) int64 {
+	files, err := db.GetFilesWithoutHash(ctx, 100) // берем порцию
 	if err != nil {
-		log.Fatalf("processHashes GetFilesWithoutHash: %w", err)
+		log.Fatalf("processHashes GetFilesWithoutHash: %v", err)
 	}
 	if len(files) == 0 {
-		return
+		return 0
 	}
 
+	hashed := atomic.Int64{}
 	var wg sync.WaitGroup
 	jobs := make(chan models.FileRecord, len(files))
 
@@ -73,11 +79,23 @@ func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *confi
 			for f := range jobs {
 				hash, err := hasher.CalculateSHA256(f.Path)
 				if err == nil {
-					err = db.UpdateHash(ctx, f.ID, hash)
-					if err != nil {
-						log.Printf("Error updating hash for file %v: %v", f.Path, err)
+					var herror error
+					for i := 1; i <= 10; i++ {
+						herror = db.UpdateHash(ctx, f.ID, hash)
+						if herror != nil {
+							sleeping := i * i
+							log.Printf("Error updating hash for file %v: %v sleeping: %d", f.Path, herror, sleeping)
+							time.Sleep(time.Duration(sleeping) * time.Second)
+							continue
+						}
+						break
 					}
+					if herror != nil {
+						log.Printf("Error updating hash for file %v: %v", f.Path, herror)
+					}
+
 					fmt.Printf("Hashed: %s\n", f.Path)
+					hashed.Add(1)
 				}
 			}
 		}()
@@ -88,4 +106,6 @@ func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *confi
 	}
 	close(jobs)
 	wg.Wait()
+
+	return hashed.Load()
 }
