@@ -7,7 +7,7 @@ storage:
     - "*.tmp"
 
 database:
-  dsn: "127.0.0.1:9306" # Протокол MySQL для Manticore
+  dsn: "http://127.0.0.1:9308" # Протокол MySQL для Manticore
   table_name: "files"
   batch_size: 1000
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -23,10 +24,12 @@ func main() {
 		log.Fatal("DB error:", err)
 	}
 
-	// 1. Помечаем старые файлы как удаленные (для синхронизации)
-	_ = db.MarkAllAsDeleted()
+	ctx := context.Background()
+	err = db.InitSchema(ctx)
+	if err != nil {
+		log.Fatal("DB InitSchema error:", err)
+	}
 
-	// 2. Сканирование
 	fileChan := make(chan models.FileRecord, 100)
 	go func() {
 		s := scanner.NewScanner(cfg.Storage.ExcludePatterns)
@@ -41,18 +44,18 @@ func main() {
 	for f := range fileChan {
 		batch = append(batch, f)
 		if len(batch) >= cfg.Database.BatchSize {
-			db.BatchReplace(batch)
+			db.BatchReplace(ctx, batch)
 			batch = batch[:0]
 		}
 	}
-	db.BatchReplace(batch) // хвост
+	db.BatchReplace(ctx, batch) // хвост
 
 	// 3. Расчет Хешей
-	processHashes(db, cfg)
+	processHashes(ctx, db, cfg)
 }
 
-func processHashes(db *database.ManticoreClient, cfg *config.Config) {
-	files, _ := db.GetFilesWithoutHash(5000) // берем порцию
+func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *config.Config) {
+	files, _ := db.GetFilesWithoutHash(ctx, 5000) // берем порцию
 	if len(files) == 0 {
 		return
 	}
@@ -68,7 +71,7 @@ func processHashes(db *database.ManticoreClient, cfg *config.Config) {
 			for f := range jobs {
 				hash, err := hasher.CalculateSHA256(f.Path)
 				if err == nil {
-					db.UpdateHash(f.ID, hash)
+					db.UpdateHash(ctx, f.ID, hash)
 					fmt.Printf("Hashed: %s\n", f.Path)
 				}
 			}
