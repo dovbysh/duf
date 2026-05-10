@@ -1,7 +1,7 @@
 package models
 
 type FileRecord struct {
-	ID        uint64 // Хеш от полного пути
+	ID        int64 // Хеш от полного пути
 	Path      string
 	Name      string
 	Size      int64

@@ -10,7 +10,6 @@ import (
 	"github.com/dovbysh/duf.git/internal/database"
 	"github.com/dovbysh/duf.git/internal/hasher"
 	"github.com/dovbysh/duf.git/internal/models"
-	"github.com/dovbysh/duf.git/internal/scanner"
 )
 
 func main() {
@@ -25,37 +24,40 @@ func main() {
 	}
 
 	ctx := context.Background()
-	err = db.InitSchema(ctx)
-	if err != nil {
-		log.Fatal("DB InitSchema error:", err)
-	}
-
-	fileChan := make(chan models.FileRecord, 100)
-	go func() {
-		s := scanner.NewScanner(cfg.Storage.ExcludePatterns)
-		for _, path := range cfg.Storage.ScanPaths {
-			s.Scan(path, fileChan)
-		}
-		close(fileChan)
-	}()
-
-	// Пакетная вставка в БД
-	var batch []models.FileRecord
-	for f := range fileChan {
-		batch = append(batch, f)
-		if len(batch) >= cfg.Database.BatchSize {
-			db.BatchReplace(ctx, batch)
-			batch = batch[:0]
-		}
-	}
-	db.BatchReplace(ctx, batch) // хвост
+	//err = db.InitSchema(ctx)
+	//if err != nil {
+	//	log.Fatal("DB InitSchema error:", err)
+	//}
+	//
+	//fileChan := make(chan models.FileRecord, 100)
+	//go func() {
+	//	s := scanner.NewScanner(cfg.Storage.ExcludePatterns)
+	//	for _, path := range cfg.Storage.ScanPaths {
+	//		s.Scan(path, fileChan)
+	//	}
+	//	close(fileChan)
+	//}()
+	//
+	//// Пакетная вставка в БД
+	//var batch []models.FileRecord
+	//for f := range fileChan {
+	//	batch = append(batch, f)
+	//	if len(batch) >= cfg.Database.BatchSize {
+	//		db.BatchReplace(ctx, batch)
+	//		batch = batch[:0]
+	//	}
+	//}
+	//db.BatchReplace(ctx, batch) // хвост
 
 	// 3. Расчет Хешей
 	processHashes(ctx, db, cfg)
 }
 
 func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *config.Config) {
-	files, _ := db.GetFilesWithoutHash(ctx, 5000) // берем порцию
+	files, err := db.GetFilesWithoutHash(ctx, 5000) // берем порцию
+	if err != nil {
+		log.Fatalf("processHashes GetFilesWithoutHash: %w", err)
+	}
 	if len(files) == 0 {
 		return
 	}
@@ -71,7 +73,10 @@ func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *confi
 			for f := range jobs {
 				hash, err := hasher.CalculateSHA256(f.Path)
 				if err == nil {
-					db.UpdateHash(ctx, f.ID, hash)
+					err = db.UpdateHash(ctx, f.ID, hash)
+					if err != nil {
+						log.Printf("Error updating hash for file %v: %v", f.Path, err)
+					}
 					fmt.Printf("Hashed: %s\n", f.Path)
 				}
 			}

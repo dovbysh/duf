@@ -1,15 +1,20 @@
 package database
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"strconv"
+	"log"
+	"net/http"
+	"strings"
 
 	"github.com/dovbysh/duf.git/internal/models"
 	manticore "github.com/manticoresoftware/manticoresearch-go"
 )
 
 type ManticoreClient struct {
+	httpAddr  string
 	client    *manticore.APIClient
 	tableName string
 }
@@ -22,10 +27,12 @@ func NewClient(host string, tableName string) (*ManticoreClient, error) {
 	return &ManticoreClient{
 		client:    client,
 		tableName: tableName,
+		httpAddr:  host,
 	}, nil
 }
 
 func (m *ManticoreClient) InitSchema(ctx context.Context) error {
+	// Убрана запятая после ")" и точка с запятой в конце
 	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
         path text, 
         name text, 
@@ -34,7 +41,7 @@ func (m *ManticoreClient) InitSchema(ctx context.Context) error {
         ctime bigint, 
         sha256 string, 
         is_deleted int
-    ) attr_uint='size', attr_uint='mtime', attr_uint='ctime', attr_uint='is_deleted'`, m.tableName)
+    ) morphology='stem_en'`, m.tableName)
 
 	_, _, err := m.client.UtilsAPI.Sql(ctx).Body(query).Execute()
 	return err
@@ -45,17 +52,42 @@ func (m *ManticoreClient) BatchReplace(ctx context.Context, files []models.FileR
 		return nil
 	}
 
-	var bulkBody string
+	var bulkLines []string
 	for _, f := range files {
-		insertLine := fmt.Sprintf(`{"replace": {"index": "%s", "id": %d, "doc": {"path": "%s", "name": "%s", "size": %d, "mtime": %d, "ctime": %d, "is_deleted": %d, "sha256": "%s"}}}`,
-			m.tableName, f.ID, f.Path, f.Name, f.Size, f.MTime, f.CTime, f.IsDeleted, f.SHA256)
-		bulkBody += insertLine + "\n"
+		// Подготавливаем данные документа
+		doc := map[string]interface{}{
+			"path":       f.Path,
+			"name":       f.Name,
+			"size":       f.Size,
+			"mtime":      f.MTime,
+			"ctime":      f.CTime,
+			"is_deleted": f.IsDeleted,
+			"sha256":     f.SHA256,
+		}
+
+		// Создаем запрос Replace (аналог Insert в примере, но с перезаписью по ID)
+		// Используем Marshal, чтобы SDK корректно экранировало спецсимволы в путях
+		meta := map[string]interface{}{
+			"replace": map[string]interface{}{
+				"index": m.tableName,
+				"id":    f.ID,
+				"doc":   doc,
+			},
+		}
+
+		b, err := json.Marshal(meta)
+		if err != nil {
+			continue
+		}
+		bulkLines = append(bulkLines, string(b))
 	}
+
+	// Соединяем строки через перенос (формат NDJSON для Bulk API)
+	bulkBody := strings.Join(bulkLines, "\n") + "\n"
 
 	_, _, err := m.client.IndexAPI.Bulk(ctx).Body(bulkBody).Execute()
 	return err
 }
-
 func (m *ManticoreClient) MarkAllAsDeleted(ctx context.Context) error {
 	query := fmt.Sprintf("UPDATE %s SET is_deleted = 1 WHERE is_deleted = 0", m.tableName)
 	_, _, err := m.client.UtilsAPI.Sql(ctx).Body(query).Execute()
@@ -63,41 +95,76 @@ func (m *ManticoreClient) MarkAllAsDeleted(ctx context.Context) error {
 }
 
 // GetFilesWithoutHash переписан на SQL для обхода ограничений типов SDK
-func (m *ManticoreClient) GetFilesWithoutHash(ctx context.Context, limit int32) ([]models.FileRecord, error) {
-	query := fmt.Sprintf("SELECT id, path FROM %s WHERE is_deleted = 0 AND sha256 = '' LIMIT %d", m.tableName, limit)
 
-	resp, _, err := m.client.UtilsAPI.Sql(ctx).Body(query).Execute()
+func (m *ManticoreClient) GetFilesWithoutHash(ctx context.Context, limit int32) ([]models.FileRecord, error) {
+	// Construct the search request
+	requestBody := map[string]interface{}{
+		"table": m.tableName,
+		"query": map[string]interface{}{
+			"bool": map[string]interface{}{
+				"must": []map[string]interface{}{
+					{"equals": map[string]interface{}{"is_deleted": 0}},
+					{"equals": map[string]interface{}{"sha256": ""}},
+				},
+			},
+		},
+		"limit": limit,
+	}
+
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", m.httpAddr+"/search", bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-	// Ответ SQL API в Manticore Go SDK возвращается в специфическом формате (вложенные слайсы)
-	if len(resp) == 0 {
-		return nil, nil
+	// CRITICAL: Use json.Decoder with UseNumber to preserve uint64 precision
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+
+	var result struct {
+		Hits struct {
+			Hits []struct {
+				ID     json.Number            `json:"_id"`
+				Source map[string]interface{} `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
 	}
 
-	var results []models.FileRecord
+	if err := decoder.Decode(&result); err != nil {
+		return nil, err
+	}
 
-	// В Manticore SQL API ответ — это []map[string]interface{}
-	for _, row := range resp {
-		data := row["data"].([]interface{})
-		for _, item := range data {
-			rowMap := item.(map[string]interface{})
+	var files []models.FileRecord
+	for _, hit := range result.Hits.Hits {
+		// Parse ID from json.Number (string) to uint64
 
-			// Извлекаем ID (он может прийти как float64 или string)
-			idVal := fmt.Sprintf("%v", rowMap["id"])
-			id, _ := strconv.ParseUint(idVal, 10, 64)
-
-			results = append(results, models.FileRecord{
-				ID:   id,
-				Path: rowMap["path"].(string),
-			})
+		path, _ := hit.Source["path"].(string)
+		if path == "" {
+			continue
 		}
+		id, err := hit.ID.Int64()
+		if err != nil {
+			log.Println("Error getting file id:", hit.ID.String(), err)
+			continue
+		}
+		files = append(files, models.FileRecord{
+			ID:   id,
+			Path: path,
+		})
 	}
-	return results, nil
+
+	return files, nil
 }
 
-func (m *ManticoreClient) UpdateHash(ctx context.Context, id uint64, hash string) error {
+func (m *ManticoreClient) UpdateHash(ctx context.Context, id int64, hash string) error {
 	// Прямой SQL UPDATE — самый надежный способ
 	query := fmt.Sprintf("UPDATE %s SET sha256 = '%s' WHERE id = %d", m.tableName, hash, id)
 	_, _, err := m.client.UtilsAPI.Sql(ctx).Body(query).Execute()

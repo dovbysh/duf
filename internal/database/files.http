@@ -1,0 +1,20 @@
+###
+POST http://localhost:9308/search
+Content-Type: application/json
+
+{
+"table":"files",
+"query": {
+    "bool": {
+      "must": [
+        {
+          "equals": {
+            "sha256": ""
+          }
+        }
+      ]
+}
+}
+}
+
+###
