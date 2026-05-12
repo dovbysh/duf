@@ -9,3 +9,9 @@ LIMIT 100;
 UPDATE files
 SET sha256 = 'example'
 WHERE id = 0;
+
+--
+SELECT
+    count(*) AS t,
+    count(*) FILTER (WHERE sha256 = '' OR sha256 IS NULL) AS ns
+FROM files;
