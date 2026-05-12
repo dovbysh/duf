@@ -25,13 +25,14 @@ func main() {
 	if err != nil {
 		log.Fatal("DB error:", err)
 	}
+	defer db.Close()
 
 	ctx := context.Background()
-	//err = db.InitSchema(ctx)
-	//if err != nil {
-	//	log.Fatal("DB InitSchema error:", err)
-	//}
-	//
+	err = db.InitSchema(ctx)
+	if err != nil {
+		log.Fatal("DB InitSchema error:", err)
+	}
+
 	fileChan := make(chan models.FileRecord, 100)
 	go func() {
 		s := scanner.NewScanner(cfg.Storage.ExcludePatterns)
@@ -46,11 +47,15 @@ func main() {
 	for f := range fileChan {
 		batch = append(batch, f)
 		if len(batch) >= cfg.Database.BatchSize {
-			db.BatchReplace(ctx, batch)
+			if err := db.BatchReplace(ctx, batch); err != nil {
+				log.Fatalf("BatchReplace error: %v", err)
+			}
 			batch = batch[:0]
 		}
 	}
-	db.BatchReplace(ctx, batch) // хвост
+	if err := db.BatchReplace(ctx, batch); err != nil {
+		log.Fatalf("BatchReplace tail error: %v", err)
+	}
 
 	// 3. Расчет Хешей
 	for processHashes(ctx, db, cfg) > 0 {
@@ -58,7 +63,7 @@ func main() {
 	}
 }
 
-func processHashes(ctx context.Context, db *database.ManticoreClient, cfg *config.Config) int64 {
+func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config.Config) int64 {
 	files, err := db.GetFilesWithoutHash(ctx, 100) // берем порцию
 	if err != nil {
 		log.Fatalf("processHashes GetFilesWithoutHash: %v", err)

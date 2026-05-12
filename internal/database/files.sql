@@ -1,0 +1,11 @@
+-- ### files without sha256
+SELECT id, path
+FROM files
+WHERE is_deleted = 0 AND sha256 = ''
+ORDER BY id
+LIMIT 100;
+
+-- ### update hash
+UPDATE files
+SET sha256 = 'example'
+WHERE id = 0;
