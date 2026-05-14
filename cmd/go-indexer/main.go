@@ -32,7 +32,17 @@ func main() {
 		log.Fatal("Config error:", err)
 	}
 
-	db, err := database.NewClient(cfg.Database.DSN)
+	pool, err := cfg.DatabasePoolConfig()
+	if err != nil {
+		log.Fatal("DB pool config error:", err)
+	}
+
+	db, err := database.NewClient(cfg.Database.DSN, database.PoolConfig{
+		MaxOpenConns:    pool.MaxOpenConns,
+		MaxIdleConns:    pool.MaxIdleConns,
+		ConnMaxLifetime: pool.ConnMaxLifetime,
+		ConnMaxIdleTime: pool.ConnMaxIdleTime,
+	})
 	if err != nil {
 		log.Fatal("DB error:", err)
 	}
@@ -192,6 +202,7 @@ func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config
 				}
 				if err != nil {
 					log.Printf("Error updating hash for file %v: %v", f.Path, err)
+					continue
 				}
 
 				fmt.Printf("Hashed: %s\n", f.Path)

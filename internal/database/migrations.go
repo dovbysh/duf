@@ -77,6 +77,8 @@ func (p *PostgresClient) newMigrator() (*migrate.Migrate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open migration database: %w", err)
 	}
+	migrationDB.SetMaxOpenConns(1)
+	migrationDB.SetMaxIdleConns(1)
 
 	driver, err := postgres.WithInstance(migrationDB, &postgres.Config{
 		MigrationsTable:       `"public"."duf_migrations"`,

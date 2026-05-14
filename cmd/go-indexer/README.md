@@ -55,6 +55,10 @@ storage:
 database:
   dsn: "postgres://duf:duf@127.0.0.1:5432/duf?sslmode=disable"
   batch_size: 1000
+  max_open_conns: 8
+  max_idle_conns: 8
+  conn_max_lifetime: 30m
+  conn_max_idle_time: 5m
 
 performance:
   hash_workers: 2 # Ограничение для HDD

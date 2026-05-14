@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/dovbysh/duf.git/internal/models"
 	_ "github.com/lib/pq"
@@ -15,11 +16,22 @@ type PostgresClient struct {
 	dsn string
 }
 
-func NewClient(dsn string) (*PostgresClient, error) {
+type PoolConfig struct {
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
+func NewClient(dsn string, pool PoolConfig) (*PostgresClient, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(pool.MaxOpenConns)
+	db.SetMaxIdleConns(pool.MaxIdleConns)
+	db.SetConnMaxLifetime(pool.ConnMaxLifetime)
+	db.SetConnMaxIdleTime(pool.ConnMaxIdleTime)
 
 	if err := db.Ping(); err != nil {
 		db.Close()
