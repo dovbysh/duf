@@ -5,6 +5,10 @@ storage:
     - "**/node_modules/**"
     - "**/.git/**"
     - "*.tmp"
+    - "**/.lmstudio/**"
+    - "**/.codex/**"
+    - "/Users/*/Library/"
+    - "**/.cache/**"
 
 database:
   dsn: "postgres://duf:duf@127.0.0.1:55432/duf?sslmode=disable"
