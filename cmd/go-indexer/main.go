@@ -256,7 +256,22 @@ func classifyDocumentImageStateless(ctx context.Context, db *database.PostgresCl
 	analysis, err := lmClient.GetMessage(ctx, string(analize_image.Prompt01), img)
 	if err != nil {
 		log.Printf("Error analyzing image %v: %v", f.Path, err)
-	} else if err := db.UpsertImageAnalysis(ctx, f.ID, analysis); err != nil {
+		return
+	}
+
+	title, err := lmClient.GetMessage(ctx, string(analize_image.Prompt02Title), img)
+	if err != nil {
+		log.Printf("Error generating image title %v: %v", f.Path, err)
+		return
+	}
+
+	extractedText, err := lmClient.GetMessage(ctx, string(analize_image.Prompt03TextExtraction), img)
+	if err != nil {
+		log.Printf("Error extracting image text %v: %v", f.Path, err)
+		return
+	}
+
+	if err := db.UpsertImageAnalysis(ctx, f.ID, analysis, title, extractedText); err != nil {
 		log.Printf("Error saving image analysis for %v: %v", f.Path, err)
 	}
 
@@ -284,11 +299,36 @@ func classifyDocumentImageStateful(ctx context.Context, db *database.PostgresCli
 	analysis, err := analysisResponse.GetMessage()
 	if err != nil {
 		log.Printf("Error reading image analysis message %v: %v", f.Path, err)
-	} else if err := db.UpsertImageAnalysis(ctx, f.ID, analysis); err != nil {
+		return
+	}
+
+	titleResponse, err := lmClient.ContinueChat(ctx, string(analize_image.Prompt02Title), analysisResponse.ResponseID)
+	if err != nil {
+		log.Printf("Error generating image title %v: %v", f.Path, err)
+		return
+	}
+	title, err := titleResponse.GetMessage()
+	if err != nil {
+		log.Printf("Error reading image title message %v: %v", f.Path, err)
+		return
+	}
+
+	extractedTextResponse, err := lmClient.ContinueChat(ctx, string(analize_image.Prompt03TextExtraction), titleResponse.ResponseID)
+	if err != nil {
+		log.Printf("Error extracting image text %v: %v", f.Path, err)
+		return
+	}
+	extractedText, err := extractedTextResponse.GetMessage()
+	if err != nil {
+		log.Printf("Error reading extracted image text message %v: %v", f.Path, err)
+		return
+	}
+
+	if err := db.UpsertImageAnalysis(ctx, f.ID, analysis, title, extractedText); err != nil {
 		log.Printf("Error saving image analysis for %v: %v", f.Path, err)
 	}
 
-	classificationResponse, err := lmClient.ContinueChat(ctx, string(is_document.Prompt01), analysisResponse.ResponseID)
+	classificationResponse, err := lmClient.ContinueChat(ctx, string(is_document.Prompt01), extractedTextResponse.ResponseID)
 	if err != nil {
 		log.Printf("Error classifying document image %v: %v", f.Path, err)
 		return
