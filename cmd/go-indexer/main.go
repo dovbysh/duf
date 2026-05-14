@@ -37,9 +37,9 @@ func main() {
 	defer db.Close()
 
 	ctx := context.Background()
-	err = db.InitSchema(ctx)
+	err = db.Migrate()
 	if err != nil {
-		log.Fatal("DB InitSchema error:", err)
+		log.Fatal("DB migration error:", err)
 	}
 
 	if shouldRunScan(opts.mode) {

@@ -11,7 +11,7 @@ Global rules still apply. Keep this file short and focused on this repository.
   - `internal/database/` stores metadata and hashes in PostgreSQL.
   - `internal/hasher/` calculates SHA256 hashes.
   - `internal/config/` loads `config.yaml`.
-- PostgreSQL schema lives in `migrations/PostgreSQL/0000.sql`; the app also creates the table through `database.InitSchema`.
+- PostgreSQL schema migrations live in `internal/database/migrations/` and are embedded into the binary.
 
 ## Local Runtime
 

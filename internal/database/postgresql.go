@@ -42,32 +42,6 @@ func (p *PostgresClient) Close() error {
 	return p.db.Close()
 }
 
-func (p *PostgresClient) InitSchema(ctx context.Context) error {
-	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-		id numeric(20, 0) PRIMARY KEY,
-		path text NOT NULL,
-		name text NOT NULL,
-		size bigint NOT NULL,
-		mtime bigint NOT NULL,
-		ctime bigint NOT NULL,
-		sha256 text NOT NULL DEFAULT '',
-		is_deleted integer NOT NULL DEFAULT 0,
-		updated_at timestamptz NOT NULL DEFAULT now()
-	)`, p.tableName)
-
-	if _, err := p.db.ExecContext(ctx, query); err != nil {
-		return err
-	}
-
-	indexQuery := fmt.Sprintf(
-		"CREATE INDEX IF NOT EXISTS %s ON %s (is_deleted, sha256)",
-		pq.QuoteIdentifier(indexNameFromTable(p.tableName, "hash_queue_idx")),
-		p.tableName,
-	)
-	_, err := p.db.ExecContext(ctx, indexQuery)
-	return err
-}
-
 func (p *PostgresClient) BatchReplace(ctx context.Context, files []models.FileRecord) error {
 	if len(files) == 0 {
 		return nil
@@ -203,9 +177,4 @@ func isIdentifier(value string) bool {
 	}
 
 	return true
-}
-
-func indexNameFromTable(quotedTableName string, suffix string) string {
-	name := strings.NewReplacer("\"", "", ".", "_").Replace(quotedTableName)
-	return name + "_" + suffix
 }

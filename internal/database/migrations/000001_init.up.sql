@@ -1,6 +1,4 @@
-DROP TABLE IF EXISTS files;
-
-CREATE TABLE files (
+CREATE TABLE IF NOT EXISTS files (
     id numeric(20, 0) PRIMARY KEY,
     path text NOT NULL,
     name text NOT NULL,
@@ -12,4 +10,4 @@ CREATE TABLE files (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX files_hash_queue_idx ON files (is_deleted, sha256);
+CREATE INDEX IF NOT EXISTS files_hash_queue_idx ON files (is_deleted, sha256);
