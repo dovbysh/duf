@@ -14,22 +14,9 @@ import (
 var migrationsFS embed.FS
 
 func (p *PostgresClient) Migrate() error {
-	driver, err := postgres.WithInstance(p.db, &postgres.Config{
-		MigrationsTable:       `"public"."duf_migrations"`,
-		MigrationsTableQuoted: true,
-	})
+	m, err := p.newMigrator()
 	if err != nil {
-		return fmt.Errorf("create postgres migration driver: %w", err)
-	}
-
-	source, err := iofs.New(migrationsFS, "migrations")
-	if err != nil {
-		return fmt.Errorf("create embedded migration source: %w", err)
-	}
-
-	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
-	if err != nil {
-		return fmt.Errorf("create migrator: %w", err)
+		return err
 	}
 	defer m.Close()
 
@@ -38,4 +25,70 @@ func (p *PostgresClient) Migrate() error {
 	}
 
 	return nil
+}
+
+func (p *PostgresClient) MigrateDownOne() error {
+	m, err := p.newMigrator()
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+
+	if err := m.Steps(-1); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("rollback one migration: %w", err)
+	}
+
+	return nil
+}
+
+func (p *PostgresClient) ApplyDirtyMigration() (bool, error) {
+	m, err := p.newMigrator()
+	if err != nil {
+		return false, err
+	}
+	defer m.Close()
+
+	version, dirty, err := m.Version()
+	if err != nil {
+		return false, fmt.Errorf("read migration version: %w", err)
+	}
+	if !dirty {
+		return false, nil
+	}
+
+	previousVersion := int(version) - 1
+	if version == 0 {
+		previousVersion = -1
+	}
+
+	if err := m.Force(previousVersion); err != nil {
+		return false, fmt.Errorf("clear dirty migration version %d: %w", version, err)
+	}
+	if err := m.Steps(1); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return false, fmt.Errorf("apply dirty migration %d: %w", version, err)
+	}
+
+	return true, nil
+}
+
+func (p *PostgresClient) newMigrator() (*migrate.Migrate, error) {
+	driver, err := postgres.WithInstance(p.db, &postgres.Config{
+		MigrationsTable:       `"public"."duf_migrations"`,
+		MigrationsTableQuoted: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create postgres migration driver: %w", err)
+	}
+
+	source, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("create embedded migration source: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		return nil, fmt.Errorf("create migrator: %w", err)
+	}
+
+	return m, nil
 }

@@ -17,9 +17,11 @@ import (
 )
 
 type runOptions struct {
-	configPath    string
-	mode          string
-	hashBatchSize int32
+	configPath          string
+	mode                string
+	hashBatchSize       int32
+	migrateDownOne      bool
+	applyDirtyMigration bool
 }
 
 func main() {
@@ -37,6 +39,27 @@ func main() {
 	defer db.Close()
 
 	ctx := context.Background()
+	if opts.migrateDownOne {
+		if err := db.MigrateDownOne(); err != nil {
+			log.Fatal("DB migrate down one error:", err)
+		}
+		log.Print("rolled back one database migration")
+		return
+	}
+
+	if opts.applyDirtyMigration {
+		applied, err := db.ApplyDirtyMigration()
+		if err != nil {
+			log.Fatal("DB apply dirty migration error:", err)
+		}
+		if applied {
+			log.Print("applied current dirty database migration")
+		} else {
+			log.Print("no dirty database migration to apply")
+		}
+		return
+	}
+
 	err = db.Migrate()
 	if err != nil {
 		log.Fatal("DB migration error:", err)
@@ -60,7 +83,13 @@ func parseOptions() runOptions {
 	flag.StringVar(&opts.configPath, "config", "config.yaml", "path to config file")
 	flag.StringVar(&opts.mode, "mode", "all", "run mode: all, scan, hash")
 	flag.IntVar(&hashBatchSize, "hash-batch-size", 100, "number of files to hash per database query")
+	flag.BoolVar(&opts.migrateDownOne, "migrate-down-one", false, "roll back one database migration and exit")
+	flag.BoolVar(&opts.applyDirtyMigration, "migrate-apply-dirty", false, "apply the current dirty database migration and exit")
 	flag.Parse()
+
+	if opts.migrateDownOne && opts.applyDirtyMigration {
+		log.Fatal("migrate-down-one and migrate-apply-dirty cannot be used together")
+	}
 
 	switch opts.mode {
 	case "all", "scan", "hash":
