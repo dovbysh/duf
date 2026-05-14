@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -72,21 +73,30 @@ func (p *PostgresClient) ApplyDirtyMigration() (bool, error) {
 }
 
 func (p *PostgresClient) newMigrator() (*migrate.Migrate, error) {
-	driver, err := postgres.WithInstance(p.db, &postgres.Config{
+	migrationDB, err := sql.Open("postgres", p.dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open migration database: %w", err)
+	}
+
+	driver, err := postgres.WithInstance(migrationDB, &postgres.Config{
 		MigrationsTable:       `"public"."duf_migrations"`,
 		MigrationsTableQuoted: true,
 	})
 	if err != nil {
+		migrationDB.Close()
 		return nil, fmt.Errorf("create postgres migration driver: %w", err)
 	}
 
 	source, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
+		driver.Close()
 		return nil, fmt.Errorf("create embedded migration source: %w", err)
 	}
 
 	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
 	if err != nil {
+		source.Close()
+		driver.Close()
 		return nil, fmt.Errorf("create migrator: %w", err)
 	}
 

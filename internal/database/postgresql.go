@@ -11,7 +11,8 @@ import (
 )
 
 type PostgresClient struct {
-	db *sql.DB
+	db  *sql.DB
+	dsn string
 }
 
 func NewClient(dsn string) (*PostgresClient, error) {
@@ -26,7 +27,8 @@ func NewClient(dsn string) (*PostgresClient, error) {
 	}
 
 	return &PostgresClient{
-		db: db,
+		db:  db,
+		dsn: dsn,
 	}, nil
 }
 
