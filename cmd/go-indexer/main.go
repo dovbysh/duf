@@ -14,7 +14,9 @@ import (
 
 	"github.com/dovbysh/duf.git/internal/ai/analize_image"
 	"github.com/dovbysh/duf.git/internal/ai/is_document"
+	"github.com/dovbysh/duf.git/internal/ai/is_medical"
 	"github.com/dovbysh/duf.git/internal/ai/lmstudio"
+	"github.com/dovbysh/duf.git/internal/ai/medical_lab_report"
 	"github.com/dovbysh/duf.git/internal/config"
 	"github.com/dovbysh/duf.git/internal/database"
 	"github.com/dovbysh/duf.git/internal/hasher"
@@ -281,7 +283,10 @@ func classifyDocumentImageStateless(ctx context.Context, db *database.PostgresCl
 		return
 	}
 
-	saveDocumentClassification(ctx, db, f, message)
+	classification := saveDocumentClassification(ctx, db, f, message)
+	if classification != nil && classification.TextPresent {
+		processMedicalDocumentStateless(ctx, db, lmClient, f, img)
+	}
 }
 
 func classifyDocumentImageStateful(ctx context.Context, db *database.PostgresClient, lmClient *lmstudio.Client, f models.FileRecord, img []byte) {
@@ -340,18 +345,103 @@ func classifyDocumentImageStateful(ctx context.Context, db *database.PostgresCli
 		return
 	}
 
-	saveDocumentClassification(ctx, db, f, message)
+	classification := saveDocumentClassification(ctx, db, f, message)
+	if classification != nil && classification.TextPresent {
+		processMedicalDocumentStateful(ctx, db, lmClient, f, classificationResponse.ResponseID)
+	}
 }
 
-func saveDocumentClassification(ctx context.Context, db *database.PostgresClient, f models.FileRecord, message string) {
+func saveDocumentClassification(ctx context.Context, db *database.PostgresClient, f models.FileRecord, message string) *is_document.DocumentClassification {
 	classification, err := is_document.GetDocumentClassification(message)
 	if err != nil {
 		log.Printf("Error parsing document classification for %v: %v", f.Path, err)
-		return
+		return nil
 	}
 
 	if err := db.UpsertDocumentClassification(ctx, f.ID, *classification); err != nil {
 		log.Printf("Error saving document classification for %v: %v", f.Path, err)
+		return nil
+	}
+
+	return classification
+}
+
+func processMedicalDocumentStateless(ctx context.Context, db *database.PostgresClient, lmClient *lmstudio.Client, f models.FileRecord, img []byte) {
+	message, err := lmClient.GetMessage(ctx, string(is_medical.Prompt01), img)
+	if err != nil {
+		log.Printf("Error classifying medical document %v: %v", f.Path, err)
+		return
+	}
+
+	classification := saveMedicalDocumentClassification(ctx, db, f, message)
+	if isLabAnalysisResults(classification) {
+		reportMessage, err := lmClient.GetMessage(ctx, string(medical_lab_report.Prompt01), img)
+		if err != nil {
+			log.Printf("Error parsing medical lab report %v: %v", f.Path, err)
+			return
+		}
+		saveMedicalLabReport(ctx, db, f, reportMessage)
+	}
+}
+
+func processMedicalDocumentStateful(ctx context.Context, db *database.PostgresClient, lmClient *lmstudio.Client, f models.FileRecord, previousResponseID string) {
+	response, err := lmClient.ContinueChat(ctx, string(is_medical.Prompt01), previousResponseID)
+	if err != nil {
+		log.Printf("Error classifying medical document %v: %v", f.Path, err)
+		return
+	}
+	message, err := response.GetMessage()
+	if err != nil {
+		log.Printf("Error reading medical classification message %v: %v", f.Path, err)
+		return
+	}
+
+	classification := saveMedicalDocumentClassification(ctx, db, f, message)
+	if isLabAnalysisResults(classification) {
+		reportResponse, err := lmClient.ContinueChat(ctx, string(medical_lab_report.Prompt01), response.ResponseID)
+		if err != nil {
+			log.Printf("Error parsing medical lab report %v: %v", f.Path, err)
+			return
+		}
+		reportMessage, err := reportResponse.GetMessage()
+		if err != nil {
+			log.Printf("Error reading medical lab report message %v: %v", f.Path, err)
+			return
+		}
+		saveMedicalLabReport(ctx, db, f, reportMessage)
+	}
+}
+
+func saveMedicalDocumentClassification(ctx context.Context, db *database.PostgresClient, f models.FileRecord, message string) *is_medical.DocumentClassification {
+	classification, err := is_medical.GetDocumentClassification(message)
+	if err != nil {
+		log.Printf("Error parsing medical document classification for %v: %v", f.Path, err)
+		return nil
+	}
+
+	if err := db.UpsertMedicalDocumentClassification(ctx, f.ID, *classification); err != nil {
+		log.Printf("Error saving medical document classification for %v: %v", f.Path, err)
+		return nil
+	}
+
+	return classification
+}
+
+func isLabAnalysisResults(classification *is_medical.DocumentClassification) bool {
+	return classification != nil &&
+		classification.DocumentType != nil &&
+		*classification.DocumentType == is_medical.DocLabAnalysisResults
+}
+
+func saveMedicalLabReport(ctx context.Context, db *database.PostgresClient, f models.FileRecord, message string) {
+	report, err := medical_lab_report.GetLabReport(message)
+	if err != nil {
+		log.Printf("Error parsing medical lab report for %v: %v", f.Path, err)
+		return
+	}
+
+	if err := db.UpsertMedicalLabReport(ctx, f.ID, *report); err != nil {
+		log.Printf("Error saving medical lab report for %v: %v", f.Path, err)
 		return
 	}
 }
