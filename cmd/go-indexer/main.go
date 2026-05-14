@@ -5,10 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/dovbysh/duf.git/internal/ai/is_document"
+	"github.com/dovbysh/duf.git/internal/ai/lmstudio"
 	"github.com/dovbysh/duf.git/internal/config"
 	"github.com/dovbysh/duf.git/internal/database"
 	"github.com/dovbysh/duf.git/internal/hasher"
@@ -81,7 +86,12 @@ func main() {
 
 	if shouldRunHash(opts.mode) {
 		log.Printf("running processHashes...")
-		for processHashes(ctx, db, cfg, opts.hashBatchSize) > 0 {
+		lmClient := lmstudio.NewFromConfig(lmstudio.Config{
+			AuthToken: cfg.LMStudio.AuthToken,
+			APIURL:    cfg.LMStudio.APIURL,
+			ModelName: cfg.LMStudio.ModelName,
+		})
+		for processHashes(ctx, db, cfg, lmClient, opts.hashBatchSize) > 0 {
 		}
 	}
 }
@@ -161,7 +171,7 @@ func scanFiles(ctx context.Context, db *database.PostgresClient, cfg *config.Con
 	}
 }
 
-func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config.Config, batchSize int32) int64 {
+func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config.Config, lmClient *lmstudio.Client, batchSize int32) int64 {
 	files, err := db.GetFilesWithoutHash(ctx, batchSize) // берем порцию
 	if err != nil {
 		log.Fatalf("processHashes GetFilesWithoutHash: %v", err)
@@ -204,9 +214,10 @@ func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config
 					log.Printf("Error updating hash for file %v: %v", f.Path, err)
 					continue
 				}
-
-				fmt.Printf("Hashed: %s\n", f.Path)
 				hashed.Add(1)
+				fmt.Printf("Hashed: %s\n", f.Path)
+
+				classifyDocumentImage(ctx, db, lmClient, f)
 			}
 		}()
 	}
@@ -218,4 +229,42 @@ func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config
 	wg.Wait()
 
 	return hashed.Load()
+}
+
+func classifyDocumentImage(ctx context.Context, db *database.PostgresClient, lmClient *lmstudio.Client, f models.FileRecord) {
+	if !isSupportedDocumentImage(f.Path) {
+		return
+	}
+
+	img, err := os.ReadFile(f.Path)
+	if err != nil {
+		log.Printf("Error reading image for document classification %v: %v", f.Path, err)
+		return
+	}
+
+	message, err := lmClient.GetMessage(ctx, string(is_document.Prompt01), img)
+	if err != nil {
+		log.Printf("Error classifying document image %v: %v", f.Path, err)
+		return
+	}
+
+	classification, err := is_document.GetDocumentClassification(message)
+	if err != nil {
+		log.Printf("Error parsing document classification for %v: %v", f.Path, err)
+		return
+	}
+
+	if err := db.UpsertDocumentClassification(ctx, f.ID, *classification); err != nil {
+		log.Printf("Error saving document classification for %v: %v", f.Path, err)
+		return
+	}
+}
+
+func isSupportedDocumentImage(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg", ".png":
+		return true
+	default:
+		return false
+	}
 }

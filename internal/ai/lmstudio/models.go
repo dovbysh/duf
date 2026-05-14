@@ -48,7 +48,7 @@ func (ch ChatResponse) GetMessage() (string, error) {
 			return item.Content, nil
 		}
 	}
-	return "", fmt.Errorf("no message found: $v", ch)
+	return "", fmt.Errorf("no message found: %v", ch)
 }
 
 func (ch ChatResponse) GetReason() (string, error) {
@@ -57,5 +57,5 @@ func (ch ChatResponse) GetReason() (string, error) {
 			return item.Content, nil
 		}
 	}
-	return "", fmt.Errorf("no reason found: $v", ch)
+	return "", fmt.Errorf("no reason found: %v", ch)
 }

@@ -28,6 +28,11 @@ type Config struct {
 		ConnMaxLifetime string `yaml:"conn_max_lifetime"`
 		ConnMaxIdleTime string `yaml:"conn_max_idle_time"`
 	} `yaml:"database"`
+	LMStudio struct {
+		AuthToken string `yaml:"auth_token"`
+		APIURL    string `yaml:"api_url"`
+		ModelName string `yaml:"model_name"`
+	} `yaml:"lmstudio"`
 	Performance struct {
 		HashWorkers int `yaml:"hash_workers"`
 	} `yaml:"performance"`

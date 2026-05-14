@@ -11,7 +11,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"log"
 	"net/http"
 )
 
@@ -21,6 +20,12 @@ type Client struct {
 	modelName string
 
 	client *http.Client
+}
+
+type Config struct {
+	AuthToken string
+	APIURL    string
+	ModelName string
 }
 
 func New(
@@ -37,10 +42,21 @@ func New(
 }
 
 func NewDefault() *Client {
+	return NewFromConfig(Config{})
+}
+
+func NewFromConfig(cfg Config) *Client {
+	if cfg.APIURL == "" {
+		cfg.APIURL = "http://localhost:1234/api/v1/chat"
+	}
+	if cfg.ModelName == "" {
+		cfg.ModelName = "google/gemma-4-e4b"
+	}
+
 	return New(
-		"",
-		"http://localhost:1234/api/v1/chat",
-		"google/gemma-4-e4b",
+		cfg.AuthToken,
+		cfg.APIURL,
+		cfg.ModelName,
 	)
 }
 
@@ -83,7 +99,7 @@ func (c Client) ReqImgs(ctx context.Context, prompt string, imgs [][]byte) (*Cha
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", c.apiURL, bytes.NewBuffer(jsonBytes))
 	if err != nil {
-		log.Fatalf("Ошибка при создании запроса: %v", err)
+		return nil, fmt.Errorf("Ошибка при создании запроса: %w", err)
 	}
 
 	// 5. Установка заголовков (Headers), как в curl
@@ -96,7 +112,7 @@ func (c Client) ReqImgs(ctx context.Context, prompt string, imgs [][]byte) (*Cha
 	client := c.client
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Ошибка при выполнении запроса (Проверьте запущен ли API на localhost:1234): %v", err)
+		return nil, fmt.Errorf("Ошибка при выполнении запроса (Проверьте запущен ли API на localhost:1234): %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -125,5 +141,5 @@ func (c Client) GetMessage(ctx context.Context, prompt string, img []byte) (stri
 			return item.Content, nil
 		}
 	}
-	return "", fmt.Errorf("no message found: $v", items)
+	return "", fmt.Errorf("no message found: %v", items)
 }

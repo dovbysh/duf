@@ -9,6 +9,7 @@ storage:
     - "**/.codex/**"
     - "/Users/*/Library/"
     - "**/.cache/**"
+    - "/Users/*/.*"
 
 database:
   dsn: "postgres://duf:duf@127.0.0.1:55432/duf?sslmode=disable"
@@ -17,6 +18,11 @@ database:
   max_idle_conns: 8
   conn_max_lifetime: 30m
   conn_max_idle_time: 5m
+
+lmstudio:
+  auth_token: ""
+  api_url: "http://localhost:1234/api/v1/chat"
+  model_name: "google/gemma-4-e4b"
 
 performance:
   hash_workers: 2 # Ограничение для HDD
