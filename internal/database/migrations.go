@@ -14,7 +14,10 @@ import (
 var migrationsFS embed.FS
 
 func (p *PostgresClient) Migrate() error {
-	driver, err := postgres.WithInstance(p.db, &postgres.Config{})
+	driver, err := postgres.WithInstance(p.db, &postgres.Config{
+		MigrationsTable:       `"public"."duf_migrations"`,
+		MigrationsTableQuoted: true,
+	})
 	if err != nil {
 		return fmt.Errorf("create postgres migration driver: %w", err)
 	}

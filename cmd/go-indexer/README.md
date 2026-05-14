@@ -55,7 +55,7 @@ storage:
 
 database:
   dsn: "postgres://duf:duf@127.0.0.1:5432/duf?sslmode=disable"
-  table_name: "files"
+  table_name: "duf.files"
   batch_size: 1000
 
 performance:

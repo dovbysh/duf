@@ -18,6 +18,8 @@ Global rules still apply. Keep this file short and focused on this repository.
 - `config.yaml` and `docker-compose.yaml` are local runtime files and are ignored by Git.
 - Use `config.yaml-sample` and `docker-compose.yaml-sample` as the tracked examples.
 - PostgreSQL runs from Docker Compose as `duf_postgres`.
+- Application tables live in PostgreSQL schema `duf`; the main configured table is `duf.files`.
+- The `golang-migrate` metadata table must stay in `public.duf_migrations`.
 - The compose sample uses `postgres:18-alpine`, host port `55432`, and mounts the volume at `/var/lib/postgresql`.
 - The sample DSN is `postgres://duf:duf@127.0.0.1:55432/duf?sslmode=disable`.
 - Do not switch the PostgreSQL 18 volume mount back to `/var/lib/postgresql/data`.
