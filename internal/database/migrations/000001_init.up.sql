@@ -1,8 +1,8 @@
 CREATE SCHEMA IF NOT EXISTS duf;
 
 CREATE TABLE IF NOT EXISTS duf.files (
-    id numeric(20, 0) PRIMARY KEY,
-    path text NOT NULL,
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    path text NOT NULL UNIQUE,
     name text NOT NULL,
     size bigint NOT NULL,
     mtime bigint NOT NULL,
@@ -11,5 +11,3 @@ CREATE TABLE IF NOT EXISTS duf.files (
     is_deleted integer NOT NULL DEFAULT 0,
     updated_at timestamptz NOT NULL DEFAULT now()
 );
-
-CREATE INDEX IF NOT EXISTS files_hash_queue_idx ON duf.files (is_deleted, sha256);

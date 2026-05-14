@@ -47,7 +47,6 @@ func (s *Scanner) Scan(root string, results chan<- models.FileRecord) error {
 			_ = stat
 
 			results <- models.FileRecord{
-				ID:        GenerateID(path),
 				Path:      path,
 				Name:      d.Name(),
 				Size:      info.Size(),

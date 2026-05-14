@@ -13,7 +13,6 @@ type Config struct {
 	} `yaml:"storage"`
 	Database struct {
 		DSN       string `yaml:"dsn"`
-		TableName string `yaml:"table_name"`
 		BatchSize int    `yaml:"batch_size"`
 	} `yaml:"database"`
 	Performance struct {

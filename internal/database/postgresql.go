@@ -3,25 +3,18 @@ package database
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/dovbysh/duf.git/internal/models"
-	"github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
 
 type PostgresClient struct {
-	db        *sql.DB
-	tableName string
+	db *sql.DB
 }
 
-func NewClient(dsn string, tableName string) (*PostgresClient, error) {
-	quotedTableName, err := quoteQualifiedIdentifier(tableName)
-	if err != nil {
-		return nil, err
-	}
-
+func NewClient(dsn string) (*PostgresClient, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
@@ -33,8 +26,7 @@ func NewClient(dsn string, tableName string) (*PostgresClient, error) {
 	}
 
 	return &PostgresClient{
-		db:        db,
-		tableName: quotedTableName,
+		db: db,
 	}, nil
 }
 
@@ -47,14 +39,14 @@ func (p *PostgresClient) BatchReplace(ctx context.Context, files []models.FileRe
 		return nil
 	}
 
-	const columnsPerRow = 8
+	const columnsPerRow = 7
 	args := make([]any, 0, len(files)*columnsPerRow)
 	values := make([]string, 0, len(files))
 
 	for i, f := range files {
 		base := i*columnsPerRow + 1
 		values = append(values, fmt.Sprintf(
-			"($%d::numeric, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			"($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
 			base,
 			base+1,
 			base+2,
@@ -62,16 +54,14 @@ func (p *PostgresClient) BatchReplace(ctx context.Context, files []models.FileRe
 			base+4,
 			base+5,
 			base+6,
-			base+7,
 		))
-		args = append(args, f.ID.String(), f.Path, f.Name, f.Size, f.MTime, f.CTime, f.SHA256, f.IsDeleted)
+		args = append(args, f.Path, f.Name, f.Size, f.MTime, f.CTime, f.SHA256, f.IsDeleted)
 	}
 
-	query := fmt.Sprintf(`INSERT INTO %s AS existing
-		(id, path, name, size, mtime, ctime, sha256, is_deleted)
+	query := fmt.Sprintf(`INSERT INTO duf.files AS existing
+		(path, name, size, mtime, ctime, sha256, is_deleted)
 		VALUES %s
-		ON CONFLICT (id) DO UPDATE SET
-			path = EXCLUDED.path,
+		ON CONFLICT (path) DO UPDATE SET
 			name = EXCLUDED.name,
 			size = EXCLUDED.size,
 			mtime = EXCLUDED.mtime,
@@ -84,7 +74,6 @@ func (p *PostgresClient) BatchReplace(ctx context.Context, files []models.FileRe
 				ELSE existing.sha256
 			END,
 			updated_at = now()`,
-		p.tableName,
 		strings.Join(values, ","),
 	)
 
@@ -93,19 +82,16 @@ func (p *PostgresClient) BatchReplace(ctx context.Context, files []models.FileRe
 }
 
 func (p *PostgresClient) MarkAllAsDeleted(ctx context.Context) error {
-	query := fmt.Sprintf("UPDATE %s SET is_deleted = 1, updated_at = now() WHERE is_deleted = 0", p.tableName)
-	_, err := p.db.ExecContext(ctx, query)
+	_, err := p.db.ExecContext(ctx, "UPDATE duf.files SET is_deleted = 1, updated_at = now() WHERE is_deleted = 0")
 	return err
 }
 
 func (p *PostgresClient) GetFilesWithoutHash(ctx context.Context, limit int32) ([]models.FileRecord, error) {
-	query := fmt.Sprintf(`SELECT id::text, path, name, size, mtime, ctime, sha256, is_deleted
-		FROM %s
+	rows, err := p.db.QueryContext(ctx, `SELECT id, path, name, size, mtime, ctime, sha256, is_deleted
+		FROM duf.files
 		WHERE is_deleted = 0 AND sha256 = ''
 		ORDER BY id
-		LIMIT $1`, p.tableName)
-
-	rows, err := p.db.QueryContext(ctx, query, limit)
+		LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -113,10 +99,9 @@ func (p *PostgresClient) GetFilesWithoutHash(ctx context.Context, limit int32) (
 
 	var files []models.FileRecord
 	for rows.Next() {
-		var id string
 		var file models.FileRecord
 		if err := rows.Scan(
-			&id,
+			&file.ID,
 			&file.Path,
 			&file.Name,
 			&file.Size,
@@ -127,7 +112,6 @@ func (p *PostgresClient) GetFilesWithoutHash(ctx context.Context, limit int32) (
 		); err != nil {
 			return nil, err
 		}
-		file.ID = json.Number(id)
 		files = append(files, file)
 	}
 
@@ -138,43 +122,7 @@ func (p *PostgresClient) GetFilesWithoutHash(ctx context.Context, limit int32) (
 	return files, nil
 }
 
-func (p *PostgresClient) UpdateHash(ctx context.Context, id json.Number, hash string) error {
-	query := fmt.Sprintf("UPDATE %s SET sha256 = $1, updated_at = now() WHERE id = $2::numeric", p.tableName)
-	_, err := p.db.ExecContext(ctx, query, hash, id.String())
+func (p *PostgresClient) UpdateHash(ctx context.Context, id int64, hash string) error {
+	_, err := p.db.ExecContext(ctx, "UPDATE duf.files SET sha256 = $1, updated_at = now() WHERE id = $2", hash, id)
 	return err
-}
-
-func quoteQualifiedIdentifier(name string) (string, error) {
-	parts := strings.Split(name, ".")
-	quoted := make([]string, 0, len(parts))
-
-	for _, part := range parts {
-		if !isIdentifier(part) {
-			return "", fmt.Errorf("invalid database table name: %q", name)
-		}
-		quoted = append(quoted, pq.QuoteIdentifier(part))
-	}
-
-	return strings.Join(quoted, "."), nil
-}
-
-func isIdentifier(value string) bool {
-	if value == "" {
-		return false
-	}
-
-	for i, r := range value {
-		if i == 0 {
-			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && r != '_' {
-				return false
-			}
-			continue
-		}
-
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
-			return false
-		}
-	}
-
-	return true
 }

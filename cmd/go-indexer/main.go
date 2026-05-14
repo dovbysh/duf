@@ -32,7 +32,7 @@ func main() {
 		log.Fatal("Config error:", err)
 	}
 
-	db, err := database.NewClient(cfg.Database.DSN, cfg.Database.TableName)
+	db, err := database.NewClient(cfg.Database.DSN)
 	if err != nil {
 		log.Fatal("DB error:", err)
 	}
