@@ -22,7 +22,9 @@ database:
 lmstudio:
   auth_token: ""
   api_url: "http://localhost:1234/api/v1/chat"
+  delete_url: "http://localhost:1234/api/v1/chat/{response_id}"
   model_name: "google/gemma-4-e4b"
+  stateful_chats: true
 
 performance:
   hash_workers: 2 # Ограничение для HDD

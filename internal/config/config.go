@@ -29,9 +29,11 @@ type Config struct {
 		ConnMaxIdleTime string `yaml:"conn_max_idle_time"`
 	} `yaml:"database"`
 	LMStudio struct {
-		AuthToken string `yaml:"auth_token"`
-		APIURL    string `yaml:"api_url"`
-		ModelName string `yaml:"model_name"`
+		AuthToken     string `yaml:"auth_token"`
+		APIURL        string `yaml:"api_url"`
+		DeleteURL     string `yaml:"delete_url"`
+		ModelName     string `yaml:"model_name"`
+		StatefulChats bool   `yaml:"stateful_chats"`
 	} `yaml:"lmstudio"`
 	Performance struct {
 		HashWorkers int `yaml:"hash_workers"`

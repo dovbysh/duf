@@ -90,6 +90,7 @@ func main() {
 		lmClient := lmstudio.NewFromConfig(lmstudio.Config{
 			AuthToken: cfg.LMStudio.AuthToken,
 			APIURL:    cfg.LMStudio.APIURL,
+			DeleteURL: cfg.LMStudio.DeleteURL,
 			ModelName: cfg.LMStudio.ModelName,
 		})
 		for processHashes(ctx, db, cfg, lmClient, opts.hashBatchSize) > 0 {
@@ -218,7 +219,7 @@ func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config
 				hashed.Add(1)
 				fmt.Printf("Hashed: %s\n", f.Path)
 
-				classifyDocumentImage(ctx, db, lmClient, f)
+				classifyDocumentImage(ctx, db, cfg, lmClient, f)
 			}
 		}()
 	}
@@ -232,7 +233,7 @@ func processHashes(ctx context.Context, db *database.PostgresClient, cfg *config
 	return hashed.Load()
 }
 
-func classifyDocumentImage(ctx context.Context, db *database.PostgresClient, lmClient *lmstudio.Client, f models.FileRecord) {
+func classifyDocumentImage(ctx context.Context, db *database.PostgresClient, cfg *config.Config, lmClient *lmstudio.Client, f models.FileRecord) {
 	if !isSupportedDocumentImage(f.Path) {
 		return
 	}
@@ -243,6 +244,15 @@ func classifyDocumentImage(ctx context.Context, db *database.PostgresClient, lmC
 		return
 	}
 
+	if !cfg.LMStudio.StatefulChats {
+		classifyDocumentImageStateless(ctx, db, lmClient, f, img)
+		return
+	}
+
+	classifyDocumentImageStateful(ctx, db, lmClient, f, img)
+}
+
+func classifyDocumentImageStateless(ctx context.Context, db *database.PostgresClient, lmClient *lmstudio.Client, f models.FileRecord, img []byte) {
 	analysis, err := lmClient.GetMessage(ctx, string(analize_image.Prompt01), img)
 	if err != nil {
 		log.Printf("Error analyzing image %v: %v", f.Path, err)
@@ -256,6 +266,44 @@ func classifyDocumentImage(ctx context.Context, db *database.PostgresClient, lmC
 		return
 	}
 
+	saveDocumentClassification(ctx, db, f, message)
+}
+
+func classifyDocumentImageStateful(ctx context.Context, db *database.PostgresClient, lmClient *lmstudio.Client, f models.FileRecord, img []byte) {
+	analysisResponse, err := lmClient.StartChat(ctx, string(analize_image.Prompt01), img)
+	if err != nil {
+		log.Printf("Error analyzing image %v: %v", f.Path, err)
+		return
+	}
+	defer func() {
+		if err := lmClient.DeleteChat(ctx, analysisResponse.ResponseID); err != nil {
+			log.Printf("Error deleting image analysis chat for %v: %v", f.Path, err)
+		}
+	}()
+
+	analysis, err := analysisResponse.GetMessage()
+	if err != nil {
+		log.Printf("Error reading image analysis message %v: %v", f.Path, err)
+	} else if err := db.UpsertImageAnalysis(ctx, f.ID, analysis); err != nil {
+		log.Printf("Error saving image analysis for %v: %v", f.Path, err)
+	}
+
+	classificationResponse, err := lmClient.ContinueChat(ctx, string(is_document.Prompt01), analysisResponse.ResponseID)
+	if err != nil {
+		log.Printf("Error classifying document image %v: %v", f.Path, err)
+		return
+	}
+
+	message, err := classificationResponse.GetMessage()
+	if err != nil {
+		log.Printf("Error reading document classification message %v: %v", f.Path, err)
+		return
+	}
+
+	saveDocumentClassification(ctx, db, f, message)
+}
+
+func saveDocumentClassification(ctx context.Context, db *database.PostgresClient, f models.FileRecord, message string) {
 	classification, err := is_document.GetDocumentClassification(message)
 	if err != nil {
 		log.Printf("Error parsing document classification for %v: %v", f.Path, err)

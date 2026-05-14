@@ -4,12 +4,13 @@ import "fmt"
 
 // ChatRequest - Главная структура, соответствующая всему JSON-телу.
 type ChatRequest struct {
-	Model         string        `json:"model"`
-	Input         []MessagePart `json:"input"`
-	ContextLength int           `json:"context_length"`
-	Temperature   float64       `json:"temperature"`
-	Reasoning     string        `json:"reasoning"`
-	Store         bool          `json:"store"`
+	Model              string        `json:"model"`
+	Input              []MessagePart `json:"input"`
+	ContextLength      int           `json:"context_length"`
+	Temperature        float64       `json:"temperature"`
+	Reasoning          string        `json:"reasoning"`
+	Store              bool          `json:"store"`
+	PreviousResponseID string        `json:"previous_response_id,omitempty"`
 }
 
 // MessagePart - Структура, описывающая один элемент в массиве "input".

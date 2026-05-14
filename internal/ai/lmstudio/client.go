@@ -12,11 +12,13 @@ import (
 	_ "image/png"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type Client struct {
 	authToken string
 	apiURL    string
+	deleteURL string
 	modelName string
 
 	client *http.Client
@@ -25,17 +27,20 @@ type Client struct {
 type Config struct {
 	AuthToken string
 	APIURL    string
+	DeleteURL string
 	ModelName string
 }
 
 func New(
 	authToken,
 	apiURL,
+	deleteURL,
 	modelName string,
 ) *Client {
 	return &Client{
 		authToken: authToken,
 		apiURL:    apiURL,
+		deleteURL: deleteURL,
 		modelName: modelName,
 		client:    &http.Client{},
 	}
@@ -49,6 +54,9 @@ func NewFromConfig(cfg Config) *Client {
 	if cfg.APIURL == "" {
 		cfg.APIURL = "http://localhost:1234/api/v1/chat"
 	}
+	if cfg.DeleteURL == "" {
+		cfg.DeleteURL = strings.TrimRight(cfg.APIURL, "/") + "/{response_id}"
+	}
 	if cfg.ModelName == "" {
 		cfg.ModelName = "google/gemma-4-e4b"
 	}
@@ -56,6 +64,7 @@ func NewFromConfig(cfg Config) *Client {
 	return New(
 		cfg.AuthToken,
 		cfg.APIURL,
+		cfg.DeleteURL,
 		cfg.ModelName,
 	)
 }
@@ -65,6 +74,17 @@ func (c Client) Req(ctx context.Context, prompt string, img []byte) (*ChatRespon
 }
 
 func (c Client) ReqImgs(ctx context.Context, prompt string, imgs [][]byte) (*ChatResponse, error) {
+	return c.ReqImgsWithOptions(ctx, prompt, imgs, RequestOptions{
+		Store: false,
+	})
+}
+
+type RequestOptions struct {
+	Store              bool
+	PreviousResponseID string
+}
+
+func (c Client) ReqImgsWithOptions(ctx context.Context, prompt string, imgs [][]byte, opts RequestOptions) (*ChatResponse, error) {
 	requestPayload := ChatRequest{
 		Model: c.modelName,
 		Input: []MessagePart{
@@ -73,10 +93,11 @@ func (c Client) ReqImgs(ctx context.Context, prompt string, imgs [][]byte) (*Cha
 				Content: prompt,
 			},
 		},
-		ContextLength: 131072,
-		Temperature:   0.0,
-		Reasoning:     "on",
-		Store:         false,
+		ContextLength:      131072,
+		Temperature:        0.0,
+		Reasoning:          "on",
+		Store:              opts.Store,
+		PreviousResponseID: opts.PreviousResponseID,
 	}
 	for _, img := range imgs {
 		if len(img) > 0 {
@@ -129,6 +150,47 @@ func (c Client) ReqImgs(ctx context.Context, prompt string, imgs [][]byte) (*Cha
 	}
 
 	return &response, nil
+}
+
+func (c Client) StartChat(ctx context.Context, prompt string, img []byte) (*ChatResponse, error) {
+	return c.ReqImgsWithOptions(ctx, prompt, [][]byte{img}, RequestOptions{
+		Store: true,
+	})
+}
+
+func (c Client) ContinueChat(ctx context.Context, prompt string, previousResponseID string) (*ChatResponse, error) {
+	return c.ReqImgsWithOptions(ctx, prompt, nil, RequestOptions{
+		Store:              true,
+		PreviousResponseID: previousResponseID,
+	})
+}
+
+func (c Client) DeleteChat(ctx context.Context, responseID string) error {
+	if responseID == "" {
+		return nil
+	}
+
+	url := strings.ReplaceAll(c.deleteURL, "{response_id}", responseID)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("Ошибка при создании запроса удаления чата: %w", err)
+	}
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Ошибка при удалении чата: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API вернул ошибку удаления чата. Статус: %d. Тело ошибки: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
 }
 
 func (c Client) GetMessage(ctx context.Context, prompt string, img []byte) (string, error) {
