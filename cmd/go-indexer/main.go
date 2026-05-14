@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dovbysh/duf.git/internal/ai/analize_image"
 	"github.com/dovbysh/duf.git/internal/ai/is_document"
 	"github.com/dovbysh/duf.git/internal/ai/lmstudio"
 	"github.com/dovbysh/duf.git/internal/config"
@@ -240,6 +241,13 @@ func classifyDocumentImage(ctx context.Context, db *database.PostgresClient, lmC
 	if err != nil {
 		log.Printf("Error reading image for document classification %v: %v", f.Path, err)
 		return
+	}
+
+	analysis, err := lmClient.GetMessage(ctx, string(analize_image.Prompt01), img)
+	if err != nil {
+		log.Printf("Error analyzing image %v: %v", f.Path, err)
+	} else if err := db.UpsertImageAnalysis(ctx, f.ID, analysis); err != nil {
+		log.Printf("Error saving image analysis for %v: %v", f.Path, err)
 	}
 
 	message, err := lmClient.GetMessage(ctx, string(is_document.Prompt01), img)
